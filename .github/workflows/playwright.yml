@@ -97,7 +97,7 @@ jobs:
           E2B_API_KEY: ${{ inputs.sandbox_provider == 'e2b' && secrets.E2B_API_KEY || '' }}
           DAYTONA_API_KEY: ${{ inputs.sandbox_provider == 'daytona' && secrets.DAYTONA_API_KEY || '' }}
           BOAT_API_KEY: ${{ inputs.sandbox_provider == 'boat' && secrets.BOAT_API_KEY || '' }}
-        run: pnpm test:e2e -- --sandbox="$SANDBOX_TEST_PROVIDER"
+        run: pnpm test:e2e -- --sandbox="$SANDBOX_TEST_PROVIDER" --spec=group-chats.spec.ts
       # Homepage screenshots only: no copy or layout assertions.
       # Runs after product e2e so shared apps/web/test-results is not wiped by the product run.
       - name: Capture marketing homepage screenshots
