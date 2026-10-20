@@ -25,6 +25,8 @@ export type ThreadComposerHandle = {
 
 type ThreadComposerProps = {
   ref: Ref<ThreadComposerHandle>;
+  layoutRef?: Ref<View>;
+  onFocus?: () => void;
   agentSkills: AgentSkillCatalogEntry[];
   composerMentionTargets: ReturnType<typeof buildComposerMentionOptions>;
   composerPrompt: string;
@@ -46,6 +48,8 @@ type ThreadComposerProps = {
 
 export function ThreadComposer({
   ref,
+  layoutRef,
+  onFocus,
   agentSkills,
   composerMentionTargets,
   composerPrompt,
@@ -291,7 +295,11 @@ export function ThreadComposer({
           ))}
         </ScrollView>
       ) : null}
-      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, marginTop: 8 }}>
+      <View
+        ref={layoutRef}
+        collapsable={false}
+        style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, marginTop: 8 }}
+      >
         <MenuView
           actions={attachActions}
           colorScheme={colorScheme}
@@ -438,6 +446,7 @@ export function ThreadComposer({
                 </Text>
               ) : null}
               <TextInput
+                onFocus={onFocus}
                 value={draft}
                 onChangeText={updateDraft}
                 accessibilityLabel={composerPrompt}

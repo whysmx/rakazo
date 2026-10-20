@@ -47,6 +47,7 @@ import {
   configureForegroundNotifications,
   resumeLiveNotifications,
 } from "../lib/live-notifications";
+import { startMobileDiagnostics } from "../lib/mobile-diagnostics";
 import { native, useMobileTokens, useResolvedAppearance } from "../lib/native";
 import { useNotificationResponses } from "../lib/open-notification";
 import { syncOrientation } from "../lib/orientation";
@@ -219,6 +220,9 @@ export default function Layout() {
   // Beside the list a chat swaps in place, the way it does when picked from a sidebar.
   const chatAnimation = useSplitView().split ? "none" : undefined;
   const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (ready) return startMobileDiagnostics();
+  }, [ready]);
   useNotificationResponses(ready);
   const [appearanceReady, setAppearanceReady] = useState(false);
   const resolved = useResolvedAppearance();

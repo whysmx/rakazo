@@ -15,6 +15,7 @@ export * from "./integration-settings.js";
 export * from "./local-settings.js";
 export * from "./markdown-text.js";
 export * from "./mcp.js";
+export * from "./mobile-diagnostics.js";
 export * from "./model-backups.js";
 export * from "./model-provider.js";
 export * from "./openai-compatible-ui.js";

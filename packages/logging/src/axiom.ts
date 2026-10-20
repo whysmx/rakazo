@@ -1,6 +1,7 @@
 import { Axiom } from "@axiomhq/js";
 import { createServiceLogger } from "./env.js";
 import { installLogger } from "./logger.js";
+import { createOtlpLogSinkFromEnv } from "./otlp.js";
 import { createSentrySinkFromEnv } from "./sentry.js";
 import { guardedFlush, guardedWrite, reportSinkError } from "./sink-guard.js";
 import type { LogEvent, Logger, LogSink } from "./types.js";
@@ -73,7 +74,11 @@ export function createAxiomSinkFromEnv(
 }
 
 export function createRootLogger(service: string, env: NodeJS.ProcessEnv = process.env): Logger {
-  const optional = [createAxiomSinkFromEnv(env), createSentrySinkFromEnv(service, env)];
+  const optional = [
+    createAxiomSinkFromEnv(env),
+    createSentrySinkFromEnv(service, env),
+    createOtlpLogSinkFromEnv(service, env),
+  ];
   const logger = createServiceLogger({
     service,
     env,
