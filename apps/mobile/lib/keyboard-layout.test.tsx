@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, useEffect } from "react";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { LayoutChangeEvent, View } from "react-native";
@@ -10,6 +10,14 @@ const native = vi.hoisted(() => ({
   listeners: new Map<string, (...args: any[]) => void>(),
   insets: { top: 24, bottom: 24, left: 0, right: 0 },
   record: vi.fn(),
+  focused: true,
+  appState: "active",
+}));
+vi.mock("expo-router", () => ({
+  useFocusEffect: (effect: () => () => void) => {
+    const focused = native.focused;
+    useEffect(() => (focused ? effect() : undefined), [effect, focused]);
+  },
 }));
 vi.mock("react-native", () => {
   const listen = (name: string, callback: (...args: any[]) => void) => {
@@ -18,6 +26,9 @@ vi.mock("react-native", () => {
   };
   return {
     AppState: {
+      get currentState() {
+        return native.appState;
+      },
       addEventListener: (_name: string, callback: (...args: any[]) => void) =>
         listen("app", callback),
     },
@@ -53,6 +64,8 @@ beforeEach(async () => {
   vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   native.listeners.clear();
+  native.focused = true;
+  native.appState = "active";
   native.record.mockClear();
   root = createRoot(document.createElement("div"));
   await act(async () => root.render(createElement(Harness)));
@@ -94,5 +107,47 @@ describe("keyboard layout recovery", () => {
     expect(layout.offset).toBe(90);
     await act(async () => delayed?.(0, 0, 400, 800));
     expect(layout.offset).toBe(90);
+  });
+  it("records the settled layout instead of flooding the buffer with animation frames", async () => {
+    layout.container.current = view(88, 712);
+    native.record.mockClear();
+    for (let i = 0; i < 40; i++) {
+      layout.composer.current = view(700 - i * 6, 40);
+      await act(async () =>
+        layout.onLayout({ nativeEvent: { layout: { y: 0 } } } as LayoutChangeEvent),
+      );
+    }
+    expect(native.record).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(350));
+    expect(native.record).toHaveBeenCalledOnce();
+    expect(native.record).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reason: "layout", composer: expect.objectContaining({ y: 466 }) }),
+    );
+  });
+  it("samples a stationary foreground layout and stops when the screen loses focus", async () => {
+    layout.container.current = view(88, 712);
+    layout.composer.current = view(700, 60);
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(native.record).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reason: "layout", overlap: 260 }),
+    );
+    native.record.mockClear();
+    native.appState = "background";
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(native.record).not.toHaveBeenCalled();
+    native.appState = "active";
+    native.focused = false;
+    await act(async () => root.render(createElement(Harness)));
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(native.record).not.toHaveBeenCalled();
+  });
+  it("still records keyboard state when a native view does not answer measurement", async () => {
+    layout.container.current = { measureInWindow() {} } as unknown as View;
+    layout.composer.current = view(700, 60);
+    await act(async () => layout.onFocus());
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(native.record).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reason: "input_focus", container: null, overlap: 260 }),
+    );
   });
 });

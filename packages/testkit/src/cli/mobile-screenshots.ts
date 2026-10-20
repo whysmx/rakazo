@@ -10,7 +10,10 @@ import {
   PipedreamConnector,
   ThirdPartyConnectorEmulator,
 } from "@rakazo/adapters";
+import type { MobileDiagnostic } from "@rakazo/contracts";
+import { mobileDiagnosticSchema } from "@rakazo/contracts";
 import { createThreadMessage, type PrismaClient } from "@rakazo/db";
+import { createServiceLogger, SERVICE_NAMES } from "@rakazo/logging";
 import { sessionCookieHeader } from "../index.js";
 import { runProcess } from "./process.js";
 
@@ -62,7 +65,30 @@ async function main() {
     { fetch: thirdParties.fetch, resolveHostname: thirdParties.resolveHostname },
   );
   const { createApp } = await import("../../../../apps/api/src/app.ts");
+  const mobileDiagnostics: MobileDiagnostic[] = [];
+  let diagnosticUploads = 0;
+  const logger = createServiceLogger({
+    service: SERVICE_NAMES.api,
+    extraSinks: [
+      {
+        write(event) {
+          if (event["event.name"] === "mobile.layout") {
+            const parsed = mobileDiagnosticSchema.safeParse(event.mobile);
+            if (parsed.success) mobileDiagnostics.push(parsed.data);
+          }
+          if (
+            event.message === "http.request.completed" &&
+            event["http.route"] === "/api/diagnostics/mobile" &&
+            event["http.method"] === "POST" &&
+            event["http.status"] === 204
+          )
+            diagnosticUploads++;
+        },
+      },
+    ],
+  });
   const handles = await createApp({
+    logger,
     databaseUrl: process.env.DATABASE_URL!,
     dataDir: DATA_DIR,
     apiHost: "0.0.0.0",
@@ -95,6 +121,31 @@ async function main() {
       try {
         if (window) resizeEmulator(window.size, window.density);
         await runFlow(flow, fixture);
+        if (flow === "keyboard-lifecycle") {
+          const started = Date.now();
+          const uploadsBefore = diagnosticUploads;
+          // Exercise repeated uploads while the keyboard is stationary, not only its animation.
+          while (Date.now() - started < 45_000 && diagnosticUploads < uploadsBefore + 2) {
+            await new Promise((resolve) => setTimeout(resolve, 1_000));
+          }
+          await writeFile(
+            path.join(REPORT_DIR, "mobile-diagnostics.json"),
+            `${JSON.stringify(mobileDiagnostics, null, 2)}\n`,
+          );
+          const settled = mobileDiagnostics.filter(
+            (event) =>
+              Date.parse(event.at) >= started + 5_000 &&
+              event.reason === "layout" &&
+              event.keyboard.visible &&
+              event.composer !== null,
+          );
+          if (diagnosticUploads < uploadsBefore + 2 || settled.length < 2) {
+            throw new Error("Mobile diagnostics stopped uploading while the keyboard was open");
+          }
+          if (settled.some((event) => event.overlap === null || event.overlap > 1)) {
+            throw new Error("The stationary keyboard overlaps the composer");
+          }
+        }
       } catch (error) {
         flowFailed = true;
         flowError = error;

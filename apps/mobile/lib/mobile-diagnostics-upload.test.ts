@@ -44,6 +44,7 @@ describe("mobile diagnostic uploader", () => {
     await uploader.flush();
     for (let i = 0; i < 100; i++) uploader.record({ ...event, offset: i });
     await uploader.flush();
+    expect(send).toHaveBeenCalledTimes(4);
     await uploader.flush();
     await uploader.flush();
     await uploader.flush();
@@ -94,5 +95,47 @@ describe("mobile diagnostic uploader", () => {
     uploader.record(event);
     await uploader.flush();
     expect(send).toHaveBeenCalledTimes(2);
+  });
+  it("keeps uploading when native response cleanup never finishes", async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    const response = new Response(null, { status: 204 });
+    Object.defineProperty(response, "body", { value: { cancel } });
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(config()).mockResolvedValue(response);
+    const uploader = createMobileDiagnosticsUploader({ ...options, fetch: send });
+    await uploader.flush();
+    uploader.record(event);
+    let completed = false;
+    void uploader.flush().then(() => {
+      completed = true;
+    });
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(completed).toBe(true);
+    uploader.record({ ...event, reason: "foreground" });
+    await uploader.flush();
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(send.mock.calls[2]?.[1]?.body as string).events).toEqual([
+      { ...event, reason: "foreground" },
+    ]);
+  });
+  it("releases a stalled native request even if it ignores abort", async () => {
+    vi.useFakeTimers();
+    const send = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(config())
+      .mockImplementationOnce(() => new Promise<Response>(() => undefined))
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const uploader = createMobileDiagnosticsUploader({ ...options, fetch: send });
+    await uploader.flush();
+    uploader.record(event);
+    let completed = false;
+    void uploader.flush().then(() => {
+      completed = true;
+    });
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(completed).toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await uploader.flush();
+    expect(send).toHaveBeenCalledTimes(3);
   });
 });
