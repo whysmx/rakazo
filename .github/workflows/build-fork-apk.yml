@@ -1,0 +1,100 @@
+name: Build fork APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-android-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build signed ARM64 APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947 # v4.4.3
+
+      - name: Install and check dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @rakazo/mobile check
+
+      - name: Configure independent fork installation
+        run: |
+          node --input-type=module <<'JS'
+          import fs from "node:fs";
+          const path = "apps/mobile/app.json";
+          const document = JSON.parse(fs.readFileSync(path, "utf8"));
+          const app = document.expo;
+          app.name = `${app.name} Fork`;
+          app.android.package = `${app.android.package}.fork`;
+          app.android.versionCode = Number(process.env.GITHUB_RUN_NUMBER);
+          app.scheme = "rakazo-fork";
+          app.updates = { enabled: false };
+          delete app.extra.eas;
+          delete app.owner;
+          fs.writeFileSync(path, JSON.stringify(document, null, 2));
+          const notifications = "apps/mobile/modules/rakazo-notifications/android/src/main/java/com/rakazo/notifications/RakazoNotificationService.kt";
+          fs.writeFileSync(notifications, fs.readFileSync(notifications, "utf8").replaceAll("rakazo://", "rakazo-fork://"));
+          JS
+          pnpm --filter @rakazo/mobile exec expo prebuild --platform android --no-install
+          sed -i 's/MaxMetaspaceSize=512m/MaxMetaspaceSize=1g/' apps/mobile/android/gradle.properties
+
+      - name: Build with fork signing key
+        working-directory: apps/mobile/android
+        env:
+          FORK_KEYSTORE_BASE64: ${{ secrets.ANDROID_FORK_KEYSTORE_BASE64 }}
+          FORK_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_FORK_KEYSTORE_PASSWORD }}
+          FORK_KEYSTORE_FILE: ${{ runner.temp }}/fork-release.jks
+        run: |
+          set -euo pipefail
+          test -n "$FORK_KEYSTORE_BASE64"
+          test -n "$FORK_KEYSTORE_PASSWORD"
+          printf '%s' "$FORK_KEYSTORE_BASE64" | base64 --decode > "$FORK_KEYSTORE_FILE"
+          chmod 600 "$FORK_KEYSTORE_FILE"
+          trap 'rm -f "$FORK_KEYSTORE_FILE"' EXIT
+          cat > "$RUNNER_TEMP/fork-signing.gradle" <<'GRADLE'
+          allprojects {
+            afterEvaluate { project ->
+              if (project.plugins.hasPlugin('com.android.application')) {
+                project.android.signingConfigs.create('forkRelease') {
+                  storeFile = new File(System.getenv('FORK_KEYSTORE_FILE'))
+                  storePassword = System.getenv('FORK_KEYSTORE_PASSWORD')
+                  keyAlias = 'rakazo-fork'
+                  keyPassword = System.getenv('FORK_KEYSTORE_PASSWORD')
+                }
+                project.android.buildTypes.release.signingConfig = project.android.signingConfigs.forkRelease
+              }
+            }
+          }
+          GRADLE
+          ./gradlew app:assembleRelease -PreactNativeArchitectures=arm64-v8a \
+            --init-script "$RUNNER_TEMP/fork-signing.gradle" --no-daemon
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rakazo-fork-android-${{ github.run_number }}
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
