@@ -196,6 +196,7 @@ function configureEnvironment() {
   }
   Object.assign(process.env, {
     NODE_ENV: "test",
+    ...(process.env.MOBILE_KEYBOARD_ONLY === "true" ? { LOG_FORMAT: "json" } : {}),
     WAKEUP_DRIVER: "memory",
     SANDBOX_PROVIDER: "fake",
     AGENT_RUNTIME: "scripted",
