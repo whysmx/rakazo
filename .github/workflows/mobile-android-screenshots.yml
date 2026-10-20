@@ -37,7 +37,6 @@ jobs:
     env:
       CI: "1"
       MOBILE_KEYBOARD_ONLY: ${{ inputs.keyboard_only }}
-      MOBILE_DIAGNOSTICS_ENABLED: "true"
       DATABASE_URL: postgres://rakazo:rakazo@127.0.0.1:5433/rakazo
       EXPO_PUBLIC_API_URL: http://10.0.2.2:3110
 

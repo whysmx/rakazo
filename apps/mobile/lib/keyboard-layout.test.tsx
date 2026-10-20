@@ -9,7 +9,6 @@ import { useKeyboardLayout } from "./keyboard-layout";
 const native = vi.hoisted(() => ({
   listeners: new Map<string, (...args: any[]) => void>(),
   insets: { top: 24, bottom: 24, left: 0, right: 0 },
-  record: vi.fn(),
   focused: true,
   appState: "active",
 }));
@@ -32,22 +31,17 @@ vi.mock("react-native", () => {
       addEventListener: (_name: string, callback: (...args: any[]) => void) =>
         listen("app", callback),
     },
-    Dimensions: { get: () => ({ width: 400, height: 800 }), addEventListener: listen },
+    Dimensions: { addEventListener: listen },
     Keyboard: {
       addListener: listen,
-      isVisible: () => true,
-      metrics: () => ({ height: 300, screenY: 500 }),
     },
     Platform: { OS: "android", Version: 34, constants: { Brand: "test", Model: "test" } },
   };
 });
 vi.mock("react-native-keyboard-controller", () => ({
-  KeyboardController: { isVisible: () => true, state: () => ({ height: 300 }) },
   KeyboardEvents: { addListener: () => ({ remove() {} }) },
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => native.insets }));
-vi.mock("./app-version", () => ({ getAppVersionInfo: () => ({ nativeLabel: "1 (1)" }) }));
-vi.mock("./mobile-diagnostics", () => ({ recordMobileDiagnostic: native.record }));
 
 let root: Root;
 let layout: ReturnType<typeof useKeyboardLayout>;
@@ -66,7 +60,7 @@ beforeEach(async () => {
   native.listeners.clear();
   native.focused = true;
   native.appState = "active";
-  native.record.mockClear();
+  native.insets = { top: 24, bottom: 24, left: 0, right: 0 };
   root = createRoot(document.createElement("div"));
   await act(async () => root.render(createElement(Harness)));
 });
@@ -79,7 +73,6 @@ describe("keyboard layout recovery", () => {
   it("recovers an unavailable mount measurement on focus and remeasures after resume", async () => {
     expect(layout.offset).toBe(0);
     layout.container.current = view(88, 712);
-    layout.composer.current = view(450, 60);
     await act(async () =>
       layout.onLayout({ nativeEvent: { layout: { y: 8 } } } as LayoutChangeEvent),
     );
@@ -90,9 +83,6 @@ describe("keyboard layout recovery", () => {
     layout.container.current = view(64, 736);
     await act(async () => native.listeners.get("app")?.("active"));
     expect(layout.offset).toBe(56);
-    expect(native.record).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reason: "foreground", overlap: 10, offset: 56 }),
-    );
   });
   it("ignores a stale asynchronous measurement from before a later keyboard event", async () => {
     let delayed: ((...values: number[]) => void) | undefined;
@@ -108,46 +98,67 @@ describe("keyboard layout recovery", () => {
     await act(async () => delayed?.(0, 0, 400, 800));
     expect(layout.offset).toBe(90);
   });
-  it("records the settled layout instead of flooding the buffer with animation frames", async () => {
-    layout.container.current = view(88, 712);
-    native.record.mockClear();
+  it("remeasures after the animation settles and coalesces its delayed callbacks", async () => {
+    const measured = vi.fn((callback: (...values: number[]) => void) => callback(0, 88, 400, 712));
+    layout.container.current = { measureInWindow: measured } as unknown as View;
     for (let i = 0; i < 40; i++) {
-      layout.composer.current = view(700 - i * 6, 40);
       await act(async () =>
-        layout.onLayout({ nativeEvent: { layout: { y: 0 } } } as LayoutChangeEvent),
+        layout.onLayout({ nativeEvent: { layout: { y: 8 } } } as LayoutChangeEvent),
       );
     }
-    expect(native.record).not.toHaveBeenCalled();
+    expect(layout.offset).toBe(80);
+    expect(measured).toHaveBeenCalledTimes(40);
+    measured.mockImplementation((callback) => callback(0, 100, 400, 700));
     await act(async () => vi.advanceTimersByTimeAsync(350));
-    expect(native.record).toHaveBeenCalledOnce();
-    expect(native.record).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reason: "layout", composer: expect.objectContaining({ y: 466 }) }),
-    );
+    expect(layout.offset).toBe(92);
+    expect(measured).toHaveBeenCalledTimes(41);
   });
-  it("samples a stationary foreground layout and stops when the screen loses focus", async () => {
+  it("refreshes foreground coordinates and stops when backgrounded or unfocused", async () => {
     layout.container.current = view(88, 712);
-    layout.composer.current = view(700, 60);
+    await act(async () => vi.advanceTimersByTimeAsync(350));
+    expect(layout.offset).toBe(88);
+    layout.container.current = view(96, 704);
     await act(async () => vi.advanceTimersByTimeAsync(5_000));
-    expect(native.record).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reason: "layout", overlap: 260 }),
-    );
-    native.record.mockClear();
+    expect(layout.offset).toBe(96);
     native.appState = "background";
+    layout.container.current = view(100, 700);
     await act(async () => vi.advanceTimersByTimeAsync(5_000));
-    expect(native.record).not.toHaveBeenCalled();
+    expect(layout.offset).toBe(96);
     native.appState = "active";
     native.focused = false;
     await act(async () => root.render(createElement(Harness)));
     await act(async () => vi.advanceTimersByTimeAsync(5_000));
-    expect(native.record).not.toHaveBeenCalled();
+    expect(layout.offset).toBe(96);
+    native.focused = true;
+    await act(async () => root.render(createElement(Harness)));
+    expect(layout.offset).toBe(100);
   });
-  it("still records keyboard state when a native view does not answer measurement", async () => {
-    layout.container.current = { measureInWindow() {} } as unknown as View;
-    layout.composer.current = view(700, 60);
+  it("keeps a known offset when native measurement stalls and recovers on the next focus", async () => {
+    layout.container.current = view(88, 712);
+    await act(async () => layout.onFocus());
+    expect(layout.offset).toBe(88);
+    let delayed: ((...values: number[]) => void) | undefined;
+    layout.container.current = {
+      measureInWindow: (callback: typeof delayed) => {
+        delayed = callback;
+      },
+    } as unknown as View;
     await act(async () => layout.onFocus());
     await act(async () => vi.advanceTimersByTimeAsync(250));
-    expect(native.record).toHaveBeenLastCalledWith(
-      expect.objectContaining({ reason: "input_focus", container: null, overlap: 260 }),
-    );
+    expect(layout.offset).toBe(88);
+    await act(async () => delayed?.(0, 0, 400, 800));
+    expect(layout.offset).toBe(88);
+    layout.container.current = view(100, 700);
+    await act(async () => layout.onFocus());
+    expect(layout.offset).toBe(100);
+  });
+  it("remeasures when safe area insets change without a dimension event", async () => {
+    layout.container.current = view(88, 712);
+    await act(async () => layout.onFocus());
+    expect(layout.offset).toBe(88);
+    layout.container.current = view(72, 728);
+    native.insets = { ...native.insets, top: 8 };
+    await act(async () => root.render(createElement(Harness)));
+    expect(layout.offset).toBe(72);
   });
 });

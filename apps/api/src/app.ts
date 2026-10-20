@@ -114,7 +114,6 @@ import {
 } from "./messaging-inbound.js";
 import { createMessagingReceipts } from "./messaging-receipts.js";
 import { mountMessagingWebhookRoutes } from "./messaging-webhook.js";
-import { mobileDiagnosticsRoutes } from "./mobile-diagnostics.js";
 import { monitoringRoutes } from "./monitoring.js";
 import { mountApiRequestBodyLimits } from "./request-body-limit.js";
 import { createRouter } from "./router.js";
@@ -665,14 +664,6 @@ export async function createApp(
     return actor && { actor, sessionId: session.session.id };
   };
   const sessionActor = async (request: Request) => (await requestSession(request))?.actor ?? null;
-  app.route(
-    "/",
-    mobileDiagnosticsRoutes({
-      enabled: env.mobileDiagnosticsEnabled,
-      authenticate: sessionActor,
-      logger,
-    }),
-  );
   app.use("/rpc/*", async (c, next) => {
     const session = await requestSession(c.req.raw);
     const actor = session?.actor ?? null;

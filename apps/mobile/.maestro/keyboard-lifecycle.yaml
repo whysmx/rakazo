@@ -110,4 +110,4 @@ tags:
 - assertVisible: 'Keyboard lifecycle check\nSecond line'
 - assertVisible: "Send"
 - takeScreenshot: "keyboard-signed-in-again"
-# Keep the keyboard open while the host verifies multiple diagnostic uploads.
+- hideKeyboard

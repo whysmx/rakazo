@@ -114,7 +114,6 @@ export interface AppEnv {
   gitSha: string | undefined;
   /** Browser error reporting, served to the web app at runtime. The DSN is public by design. */
   browserMonitoring: { dsn: string; environment?: string; release?: string } | undefined;
-  mobileDiagnosticsEnabled: boolean;
   /** Private Compose control-network URL for the opt-in updater sidecar. */
   updaterUrl: string | undefined;
   /** Bearer shared with the updater; never sent to the browser. */
@@ -257,7 +256,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     port: Number(source.API_PORT ?? 3100),
     gitSha: optional(source.GIT_SHA) ?? optional(source.RAKAZO_GIT_SHA),
     browserMonitoring: browserMonitoringFromEnv(source),
-    mobileDiagnosticsEnabled: source.MOBILE_DIAGNOSTICS_ENABLED === "true",
     updaterUrl,
     updaterToken,
     imageTag: optional(source.RAKAZO_IMAGE_TAG),

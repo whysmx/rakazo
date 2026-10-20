@@ -2706,7 +2706,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           </View>
         ) : null}
         <ThreadComposer
-          layoutRef={keyboardLayout.composer}
           onFocus={keyboardLayout.onFocus}
           key={threadKey}
           ref={composerRef}

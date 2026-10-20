@@ -945,9 +945,6 @@ importers:
       '@rakazo/db':
         specifier: workspace:*
         version: link:../db
-      '@rakazo/logging':
-        specifier: workspace:*
-        version: link:../logging
       '@testcontainers/postgresql':
         specifier: 12.2.1
         version: 12.2.1
